@@ -22,6 +22,10 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
           
+          fileInput("upload", NULL, buttonLabel = "Upload...", 
+                    multiple = TRUE, accept = c(".xlsx", "csv")),
+          actionButton("update", "Combine Data"),
+          
           checkboxGroupInput(
             "cohorts", 
             "Which Cohorts to Include:",
@@ -91,16 +95,46 @@ ui <- fluidPage(
 )
 
 # Define server logic required to draw a histogram
-server <- function(input, output) {
+server <- function(input, output, session) {
   
     selected <- reactive(
       all_cohorts %>%
         filter(Cohort %in% input$cohorts)
     )
+    
+    
+    data <- reactive({
+      req(input$upload)
+      
+      ext <- tools::file_ext(input$upload$name)
+      switch(ext,
+             # csv = read.csv(input$upload$datapath),
+             csv = vroom::vroom(input$upload$datapath, delim = ","),
+             # tsv = vroom::vroom(input$upload$datapath, delim = "\t"),
+             validate("Invalid file type; Please upload a .csv file")
+      )
+    })
+    
+    observeEvent(input$update,{
+      csv = as.data.frame(data())
+      datam<-rbind.data.frame(all_cohorts, data())
+      print('here')
+      write.csv(datam, "./data/real_data_V1.csv", row.names=FALSE)
+      print('here')
+      all_cohorts <- read.csv("./data/real_data_V1.csv")
+      all_cohorts <<- as.data.frame(all_cohorts) # two << makes it available globally
+      
+      # updated check box with new data
+      updateCheckboxGroupInput(session, 
+                               "cohorts", 
+                               "Which Cohorts to Include:",
+                               choices = c(unique(all_cohorts$Cohort)),
+                               selected = unique(all_cohorts$Cohort))
+    })
 
     output$boxPlot <- renderPlot({
         # create the box plots for the selected cohorts 
-        all_cohorts %>%
+      all_cohorts %>%
           filter(Cohort %in% input$cohorts) %>%
           ggplot(aes(x=factor(Grade), color=factor(Cohort))) +
           geom_boxplot(aes_string(y=input$skillOfInterest)) +

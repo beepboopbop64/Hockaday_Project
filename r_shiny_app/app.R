@@ -17,7 +17,7 @@ ui <- fluidPage(
       )
     ,
 
-    # AHHHH
+    # Row
     fluidRow(
       sidebarLayout(
         sidebarPanel(
@@ -117,10 +117,7 @@ server <- function(input, output, session) {
     
     observeEvent(input$update,{
       csv = as.data.frame(data())
-      datam<-rbind.data.frame(all_cohorts, data())
-      print('here')
-      write.csv(datam, "./data/real_data_V1.csv", row.names=FALSE)
-      print('here')
+      write.csv(csv, "./data/real_data_V1.csv", row.names=FALSE)
       all_cohorts <- read.csv("./data/real_data_V1.csv")
       all_cohorts <<- as.data.frame(all_cohorts) # two << makes it available globally
       

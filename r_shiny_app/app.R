@@ -7,15 +7,14 @@ library(ggpubr)
 all_cohorts <- read.csv("./data/real_data_V1.csv")
 all_cohorts <- as.data.frame(all_cohorts)
 
+# navigation bar
+
 
 # Define UI for application that draws a histogram
-ui <- fluidPage(
+ui <- navbarPage(title = "Hockaday Project",
 
-    # Application title
-    fluidRow(
-      titlePanel("Data Exploration")
-      )
-    ,
+    # Data Exploration page
+    tabPanel(title = "Data Exploration",
 
     # Row
     fluidRow(
@@ -92,7 +91,85 @@ ui <- fluidPage(
       
           )
     )
+    ),
+    tabPanel(title = "Statistics",
+             
+             fluidRow(
+               column(3,
+                      radioButtons(
+                        "statSkillOfInterest",
+                        "Select Skill of Interest",
+                        c("Empathy" = "Empathy_Skills",
+                          "Advocacy" = "Advocacy_Skills",
+                          "Purpose" = "Purpose"),
+                      ),
+                      
+                      radioButtons(
+                        "statCohort",
+                        "Select Cohort",
+                        c(unique(all_cohorts$Cohort)),
+                      ),
+                      
+                      radioButtons(
+                        "statTimeOne",
+                        "Select First Time Period to Compare",
+                        c(sort(unique(all_cohorts$Grade))),
+                      ),
+                      
+                      radioButtons(
+                        "statTimeTwo",
+                        "Select Second Time Period to Compare",
+                        c(sort(unique(all_cohorts$Grade)), decreasing = TRUE),
+                      )
+                      
+               )
+             ),
+             
+             column(8,
+                    plotOutput("stat_box")
+                    
+             ),
+             
+             column(8,
+                    plotOutput("stat_hist")
+                    
+             ),
+             
+             column(8,
+                    plotOutput("stat_qq")
+                    
+             ),
+             
+             fluidRow(
+               column(width = 6,
+                 radioButtons(
+                   "assumptionsMet",
+                   "Are the assumptions met?",
+                   c("Yes, use t-test" = "t_test",
+                     "No, use Wilcox Signed Rank Test" = "wilcox"
+                     )
+                  )
+                )
+             ),
+             
+             fluidRow(
+               column(width = 6, 
+                      verbatimTextOutput("info")
+               )
+             ) 
+             
+             
+             
+             )
 )
+
+
+
+
+
+
+
+
 
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
@@ -101,6 +178,32 @@ server <- function(input, output, session) {
       all_cohorts %>%
         filter(Cohort %in% input$cohorts)
     )
+    
+    
+    stat_data <- reactive({
+      
+      grade_before <- paste('Grade', input$statTimeOne, sep = '')
+      grade_after <- paste('Grade', input$statTimeTwo, sep = '')
+      
+      cleaned_data <- all_cohorts %>% 
+        replace(is.na(.), 0) %>%
+        filter(Cohort == input$statCohort) %>%
+        filter(Grade %in% (c(input$statTimeOne, input$statTimeTwo))) %>%
+        dplyr::select(c('Cohort', 'Name', 'Grade', input$statSkillOfInterest)) %>%
+        pivot_wider(
+         names_from = 'Grade',
+         names_prefix = 'Grade',
+         values_from = input$statSkillOfInterest
+        ) %>%
+        mutate(skill_of_interest_difference = 
+                 !!as.symbol(grade_after) - !!as.symbol(grade_before)) %>%
+        drop_na(skill_of_interest_difference) %>%
+        dplyr::select(c('Cohort', 'Name', 'skill_of_interest_difference'))
+      
+      
+      cleaned_data <- as.data.frame(cleaned_data)
+
+    })
     
     
     data <- reactive({
@@ -114,6 +217,44 @@ server <- function(input, output, session) {
              validate("Invalid file type; Please upload a .csv file")
       )
     })
+    
+    observe({
+      selected_cohort <- input$statCohort
+      
+      available_grades <- all_cohorts %>%
+        filter(Cohort == selected_cohort)
+      
+      available_grades <- sort(unique(available_grades$Grade))
+      
+      updateRadioButtons(
+        session, 'statTimeOne',
+        choices = available_grades
+      )
+      
+    })
+    
+    observe({
+      selected_cohort <- input$statCohort
+      selected_time_one <- as.integer(input$statTimeOne)
+      # print('one')
+      # print(selected_time_one)
+      
+      available_grades <- all_cohorts %>%
+        filter(Cohort == selected_cohort) %>%
+        filter(Grade >= selected_time_one)
+      
+      available_grades <- unique(available_grades$Grade)
+      
+      # print('two')
+      # print(available_grades)
+      
+      updateRadioButtons(
+        session, 'statTimeTwo',
+        choices = available_grades
+      )
+      
+    })
+    
     
     observeEvent(input$update,{
       csv = as.data.frame(data())
@@ -174,6 +315,56 @@ server <- function(input, output, session) {
                                y=input$skillOfInterestScatterTwo)) +
         facet_wrap(~ Grade)
     })
+    
+    ##############
+    # STAT PLOTS #
+    ##############
+    
+    output$stat_box <- renderPlot({
+      stat_data() %>% 
+        ggplot(aes_string(y='skill_of_interest_difference')) +
+        geom_boxplot() +
+        coord_flip() +
+        theme_economist()
+        
+    })
+    
+    output$stat_hist <- renderPlot({
+      stat_data() %>% 
+        ggplot(aes_string(y='skill_of_interest_difference')) +
+        geom_histogram() +
+        coord_flip() +
+        theme_economist()
+      
+    })
+    
+    output$stat_qq <- renderPlot({
+      stat_data() %>%
+        ggplot(aes_string(sample='skill_of_interest_difference')) +
+        stat_qq() +
+        stat_qq_line() +
+        theme_economist()
+      
+    })
+    
+    output$info <- renderPrint({
+      
+      stat_test_data <- stat_data()
+      stat_test_data <- stat_test_data$skill_of_interest_difference
+      
+      if (input$assumptionsMet == "t_test") {
+        
+        stat_test_resulsts <- t.test(stat_test_data, 
+                                     alternative = "two.sided")
+      } else {
+        stat_test_resulsts <- wilcox.test(stat_test_data, 
+                    alternative = "two.sided")
+      }
+      
+      stat_test_resulsts
+    })
+    
+    
     
 }
 

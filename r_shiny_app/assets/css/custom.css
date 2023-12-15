@@ -1,0 +1,16 @@
+/* Custom styles for the navbar */
+.navbar.navbar-default {
+  height: 60px; /* Adjust the height as needed */
+  background-color: #f8f8f8; /* Optional: Change the background color */
+}
+
+/* Custom styles for the navbar text */
+.navbar-text {
+  line-height: 60px; /* Center the text vertically within the navbar */
+  margin-right: 20px; /* Optional: Adjust the right margin */
+}
+
+/* Optional: Change the font size of the navbar text */
+.navbar-text h3 {
+  font-size: 24px; /* Adjust the font size as needed */
+}

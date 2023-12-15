@@ -1,0 +1,240 @@
+---
+title: "scratch"
+author: "Jake Rastberger"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+```
+
+# Helper Functions
+```{r}
+# Function to extract text after the last <br>
+extract_after_last_br <- function(text) {
+  parts <- strsplit(text, "<br>")[[1]]
+  if (length(parts) > 1) {
+    return(tail(parts, n = 1))
+  } else {
+    return(text)
+  }
+}
+
+# Function to replace spaces with underscores and remove punctuation in column names
+replace_spaces_and_remove_punctuation <- function(df) {
+  colnames(df) <- gsub("[^\\w\\s_]", "", colnames(df), perl = TRUE) # Remove punctuation except underscores
+  colnames(df) <- gsub(" ", "_", colnames(df))  # Replace spaces with underscores
+  return(df)
+}
+
+# Function to find a number in the specified range in a text
+find_number <- function(text) {
+  numbers <- as.numeric(unlist(str_extract_all(text, '\\d+')))
+  numbers <- numbers[numbers > 31 & numbers <= 100]
+  if (length(numbers) > 0) {
+    return(numbers[1])
+  } else {
+    return(NA)
+  }
+}
+
+# Function to load data
+load_data <- function(file_path, target_sheet_name) {
+  # List all sheets in the Excel file
+  sheets <- excel_sheets(file_path)
+  
+  # Find the sheet that contains "Service Logs"
+  target_sheet <- grep(target_sheet_name, sheets, value = TRUE)
+  
+  # Check if the target sheet exists
+  if(length(target_sheet) > 0) {
+    # Read the data from the specific sheet with headers
+    data <- read_excel(file_path, sheet = target_sheet)
+    return(data)
+  } else {
+    print("No sheet contains 'Sheet1'")
+    return(NA)
+  }
+}
+
+```
+
+```{r}
+
+#############
+# Load data #
+#############
+
+survey_data <- load_data("../test_upload_data/12_15/Clean Data.SI Survey BOY (1).xlsx", "Sheet1")
+survey_data
+
+#########################
+# Clean up column names #
+#########################
+
+survey_data <- replace_spaces_and_remove_punctuation(survey_data)
+survey_data
+
+############################################################
+# Check for inconsistent_graduation_years for Student ID's #
+############################################################
+
+# Step 1: Identify duplicate Student_IDs
+potential_duplicates <- survey_data %>%
+  group_by(Student_ID) %>%
+  filter(n() > 1) %>%
+  distinct(Student_ID)
+
+# Step 2: Check What_is_your_graduation_year consistency
+inconsistent_graduation_years <- survey_data %>%
+  filter(Student_ID %in% potential_duplicates$Student_ID) %>%
+  group_by(Student_ID) %>%
+  filter(n_distinct(What_is_your_graduation_year) > 1) %>%
+  distinct(Student_ID, What_is_your_graduation_year)
+
+# Print the final list of duplicates with inconsistent graduation years
+print(inconsistent_graduation_years)
+
+
+# Check if duplicates is not empty
+if(nrow(inconsistent_graduation_years) > 0) {
+  # Printing full data for duplicate Student_IDs
+  full_data_for_duplicates <- survey_data %>%
+    filter(Student_ID %in% inconsistent_graduation_years$Student_ID)
+
+  print("Inconsistent graduation years found:")
+  print(full_data_for_duplicates)
+} else {
+  print("No inconsistent graduation years found.")
+}
+
+#################################
+# BAD JUST LEAVING HERE FOR NOW #
+#################################
+
+# Specify the Student_ID to be filtered out
+student_id_to_filter_out <- "25045"
+
+# Filtering out the specified Student_ID
+survey_data <- survey_data %>%
+  filter(Student_ID != student_id_to_filter_out)
+
+##################################################
+# Create needed columns based on graduation date #
+##################################################
+
+# Extracting year and month
+survey_data <- survey_data %>%
+  mutate(Year_Month = format(Completion_time, "%Y-%m"))
+
+# Convert 'What_is_your_graduation_year' to numeric
+survey_data$What_is_your_graduation_year <- as.numeric(survey_data$What_is_your_graduation_year)
+
+# Processing the data
+survey_data <- survey_data %>%
+  mutate(
+    Year = as.numeric(substr(Year_Month, 1, 4)),  # Extract and convert the year to numeric
+    Month = as.numeric(substr(Year_Month, 6, 7)), # Extract and convert the month to numeric
+    Modified_Year = ifelse(Month >= 8, Year + 1, Year),
+    Years_to_Graduation = What_is_your_graduation_year - Modified_Year,
+    Grade = 12 - Years_to_Graduation,
+    Years_to_Graduation = Years_to_Graduation + 1
+  ) %>%
+  rename(Cohort = What_is_your_graduation_year)
+
+print(survey_data[c("Year_Month", "Cohort", "Year", "Month", "Modified_Year")])
+# Selecting specific columns to view the result
+print(survey_data[c("Student_ID", "Year_Month", "Cohort", "Modified_Year", "Years_to_Graduation", "Grade")])
+
+
+
+# survey_data <- survey_data %>% 
+#   select(c("Student ID", "What is your graduation year?")) 
+# print(survey_data)
+
+
+```
+
+
+```{r}
+
+hockaday_data <- load_data("../test_upload_data/12_15/The Hockaday Data - 8.1.23 to 12.1.23.xlsx", "Service Logs")
+hockaday_data
+hockaday_data <- replace_spaces_and_remove_punctuation(hockaday_data)
+hockaday_data
+
+# Apply the function to the 'prompt_response' column
+hockaday_data$prompt_response <- sapply(hockaday_data$prompt_response, extract_after_last_br)
+
+# Apply the function to both columns and determine the output
+hockaday_data$result <- mapply(function(prompt, description) {
+  number_in_prompt <- find_number(prompt)
+  if (!is.na(number_in_prompt)) {
+    return(number_in_prompt)
+  } else {
+    number_in_description <- find_number(description)
+    if (!is.na(number_in_description)) {
+      return(number_in_description)
+    } else {
+      return('no_response')
+    }
+  }
+}, hockaday_data$prompt_response, hockaday_data$description)
+
+# Processing the data
+hockaday_data <- hockaday_data %>%
+  mutate(
+    Year_Month = format(service_date, "%Y-%m"),
+    Year = as.numeric(substr(Year_Month, 1, 4)),  # Extract and convert the year to numeric
+    Month = as.numeric(substr(Year_Month, 6, 7)), # Extract and convert the month to numeric
+    Modified_Year = ifelse(Month >= 8, Year + 1, Year) 
+  )
+
+hockaday_data
+write.csv(hockaday_data, file = "./example_scratch_output.csv")
+```
+
+
+```{r}
+survey_join <- survey_data %>%
+  select(Student_ID, Modified_Year, Cohort, Grade)  # Select only the necessary columns
+
+joined_data <- hockaday_data %>%
+  left_join(survey_join, by = c("Student_ID", "Modified_Year"))
+
+# View the joined data
+print(joined_data)
+
+## 25062
+
+# Mapping values in service_categories column
+joined_data <- joined_data %>%
+  mutate(service_categories = case_when(
+    service_categories == "Exploring Purpose" ~ "Purpose",
+    service_categories == "Empathy" ~ "Empathy_Skills",
+    TRUE ~ str_replace_all(service_categories, " ", "_")
+  ))
+
+# Convert the result column to numeric, non-numeric values will become NA
+joined_data$result <- as.numeric(as.character(joined_data$result))
+
+# Remove non-numeric rows (NA in result) and calculate the average
+average_results <- joined_data %>%
+  filter(!is.na(result) & !is.na(Cohort) & !is.na(Grade)) %>%
+  group_by(Student_ID, service_categories, Cohort, Grade) %>%
+  summarize(Average_Result = mean(result, na.rm = TRUE)) %>%
+  mutate(Student_ID = as.character(Student_ID)) %>%
+  rename(Name = Student_ID) %>%
+  pivot_wider(names_from = service_categories, values_from = Average_Result)
+
+
+write.csv(average_results, file = "./real_data_V2.csv")
+```
+
+
+
